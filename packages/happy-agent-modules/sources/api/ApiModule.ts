@@ -98,6 +98,7 @@ import { AbortModule } from "../abort/index.js";
 import { SurfacesModule, SurfaceError, SurfaceDocumentConflictError } from "../surfaces/index.js";
 import type { SchedulingModule } from "../scheduling/index.js";
 import {
+    artifactBackgroundInputSchema,
     ArtifactConflictError,
     ArtifactInputError,
     ArtifactNotFoundError,
@@ -352,10 +353,18 @@ const ARTIFACT_UPDATED_FIELDS = [
     "entry",
     "fileCount",
     "size",
+    "background",
     "updatedBy",
     "updatedSource",
     "updatedAt",
 ] as const;
+/**
+ * `background` on artifact creation and update: a colour, or `null` for none. The published
+ * client's request schemas do not carry it yet, so routes check it beside them.
+ */
+const artifactBackgroundRequestSchema = Type.Object({
+    background: Type.Optional(Type.Union([artifactBackgroundInputSchema, Type.Null()])),
+});
 const ARTIFACT_DELETED_FIELDS = [
     "status",
     "deletedBy",
@@ -5916,7 +5925,7 @@ export class ApiModule implements AgentModule {
                 if (request.method !== "POST") return false;
                 const body = await bodyAs(
                     request,
-                    createArtifactRequestSchema,
+                    Type.Intersect([createArtifactRequestSchema, artifactBackgroundRequestSchema]),
                     "artifact creation",
                 );
                 // A repeated ID answers before anything is staged, so a retry uses up nothing.
@@ -5936,6 +5945,7 @@ export class ApiModule implements AgentModule {
                             type: body.type,
                             title: body.title,
                             files,
+                            ...(body.background == null ? {} : { background: body.background }),
                             author: this.#artifactUser(ctx),
                             ...(source === undefined ? {} : { source }),
                         }),
@@ -6001,7 +6011,11 @@ export class ApiModule implements AgentModule {
                 return true;
             }
             if (action === undefined && request.method === "PATCH") {
-                const body = await bodyAs(request, updateArtifactRequestSchema, "artifact update");
+                const body = await bodyAs(
+                    request,
+                    Type.Intersect([updateArtifactRequestSchema, artifactBackgroundRequestSchema]),
+                    "artifact update",
+                );
                 const current = await artifacts.get(ctx, artifactId);
                 if (current === undefined) throw notFound("The artifact was not found.");
                 const resource = artifactResource(current);
@@ -6027,6 +6041,9 @@ export class ApiModule implements AgentModule {
                             artifactId,
                             expectedRevision: current.revision,
                             ...(body.title === undefined ? {} : { title: body.title }),
+                            ...(body.background === undefined
+                                ? {}
+                                : { background: body.background }),
                             ...(files === undefined ? {} : { files }),
                             ...(body.remove === undefined ? {} : { remove: body.remove }),
                             ...(body.replaceAll === undefined
