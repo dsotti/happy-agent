@@ -1557,12 +1557,13 @@ export class HappyConnection implements HappySessionOperations, HappySpawnOperat
         const messageOptions = messageOptionsFor(next);
         const content = messageFrom(message);
         const id = createId();
+        const delivery = message.delivery ?? "steer";
         const pending: HistoryPendingMessage = {
             ...(this.#connectionOwner === undefined ? {} : { userId: this.#connectionOwner.id }),
             agentId,
             blocks: this.#history.inputBlocks(content.content),
             createdAt: Date.now(),
-            delivery: "steer",
+            delivery,
             id,
             mode: modeForSelection(next),
             role: "user",
@@ -1579,7 +1580,7 @@ export class HappyConnection implements HappySessionOperations, HappySpawnOperat
                     );
                 }
                 await this.#history.queuePending(txCtx, pending);
-                await system.steer(txCtx, agentId, content, {
+                const options = {
                     ...messageOptions,
                     id,
                     metadata: {
@@ -1589,7 +1590,12 @@ export class HappyConnection implements HappySessionOperations, HappySpawnOperat
                             ? {}
                             : { userId: this.#connectionOwner.id }),
                     },
-                });
+                };
+                if (delivery === "steer") {
+                    await system.steer(txCtx, agentId, content, options);
+                } else {
+                    await system.send(txCtx, agentId, content, options);
+                }
             });
         } catch (cause) {
             if (cause instanceof HappyMessageRefused) throw cause;
